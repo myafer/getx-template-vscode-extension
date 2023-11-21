@@ -2,7 +2,7 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
 
-import { imageGenerate } from "./commands/image-generate";
+import { imageGenerate, imageGenerateRdart } from "./commands/image-generate";
 import { routersGenerate } from "./commands/routers-generate";
 
 import { newGetxCommonDirectory } from "./commands/new-getx-create-common-directory.command";
@@ -38,6 +38,10 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       "extension.new-getx-assets-generate",
       imageGenerate
+    ),
+    vscode.commands.registerCommand(
+      "extension.new-getx-assets-generate-rdart",
+      imageGenerateRdart
     ),
     vscode.commands.registerCommand(
       "extension.new-getx-create-directory",

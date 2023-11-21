@@ -26,6 +26,7 @@ const existsAsync = promisify(fs.exists);
 const mkdirAsync = promisify(fs.mkdir);
 const unlinkAsync = promisify(fs.unlink);
 const appendFileAsync = promisify(fs.appendFile);
+const overWriteAsync = promisify(fs.writeFile);
 
 var rootPath = "";
 
@@ -57,6 +58,43 @@ export const imageGenerate = async (uri: Uri) => {
     /**/
     await imagesGen(targetDirectory);
     svgsGen(targetDirectory);
+
+    window.showInformationMessage(`Successfully Generated Images Directory`);
+  } catch (error) {
+    window.showErrorMessage(
+      `Error:
+        ${error instanceof Error ? error.message : JSON.stringify(error)}`
+    );
+  }
+};
+
+export const imageGenerateRdart = async (uri: Uri) => {
+  if (vscode.workspace.workspaceFolders) {
+    rootPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+  } else {
+    vscode.window.showErrorMessage("没有打开的工作区！");
+  }
+
+  let targetDirectory = uri.fsPath;
+  console.log(targetDirectory);
+  try {
+
+    const workDir = getWorkDir(targetDirectory);
+    const rPath = path.resolve(workDir, "../../lib/src");
+    await overWriteAsync(
+      path.join(rPath, "r.dart"),
+      `// ignore_for_file: constant_identifier_names, non_constant_identifier_names, prefer_const_declarations\r\n\r\nclass R {\r\n`,
+      { encoding: "utf8" }
+    );
+
+
+    await imagesGenDart(targetDirectory);
+    // svgsGenDart(targetDirectory);
+    await appendFileSync(
+      path.join(rPath, "r.dart"),
+      `}\r\n`,
+      { encoding: "utf8" }
+    );
 
     window.showInformationMessage(`Successfully Generated Images Directory`);
   } catch (error) {
@@ -265,3 +303,147 @@ const getRelativePath = (filePath: string, targetDirectory: string): string => {
   const relativePath = path.relative(targetDirectory, filePath);
   return relativePath.replace(/\\/g, "/");
 };
+
+
+function getWorkDir(targetDirectory: string): string {
+  const files = fs.readdirSync(targetDirectory, { withFileTypes: true });
+  
+  for (const file of files) {
+    if (file.isDirectory()) {
+      const subdirectory = path.join(targetDirectory, file.name);
+      continue;
+    } else {
+      
+      const imgPath = path.parse(file.name);
+      if (!targetDirectory.includes("3.0x")) {
+        continue;
+      }
+      const workDir = path.resolve(targetDirectory, imgPath.dir, "..");
+      return workDir;
+    }
+  }
+  return "";
+}
+
+async function imagesGenDart(targetDirectory: string): Promise<void> {
+  let isFirstIteration = true;
+  console.log("------------- imagesGenDart");
+  const files = fs.readdirSync(targetDirectory, { withFileTypes: true });
+  for (const file of files) {
+    if (file.isDirectory()) {
+      const subdirectory = path.join(targetDirectory, file.name);
+      await imagesGenDart(subdirectory);
+    } else {
+      console.log(file.name);
+      const ext = path.extname(file.name).toLowerCase();
+      if (![".jpeg", ".jpg", ".png"].includes(ext)) {
+        continue;
+      }
+
+      const imgPath = path.parse(file.name);
+      // const dirPath = imgPath.dir.toLowerCase();
+      if (!targetDirectory.includes("3.0x")) {
+        continue;
+      }
+
+      const workDir = path.resolve(targetDirectory, imgPath.dir, "..");
+      console.log(file.name, workDir);
+      console.log(imgPath.dir);
+
+      // 创建 2.0x 目录
+      if (isFirstIteration) {
+        isFirstIteration = false;
+        const filesTxtPath = path.join(workDir, "files.txt");
+        if (await existsAsync(filesTxtPath)) {
+          await unlinkAsync(filesTxtPath);
+        }
+      }
+
+      // 缩放图片并写入文件列表
+      const imgPath1x = path.join(workDir, file.name);
+      const imgPath2x = path.join(workDir, "2.0x", file.name);
+      const imgPath3x = path.join(targetDirectory, file.name);
+
+      // 2x 目录
+      const path2x = path.join(workDir, "2.0x");
+      if (!(await existsAsync(path2x))) {
+        await mkdirAsync(path2x);
+      }
+
+      // 1x 图片
+      if (!(await existsAsync(imgPath1x))) {
+        await scaleImage(imgPath1x, imgPath3x, 0.3334);
+      }
+
+      // 2x 图片
+      if (!(await existsAsync(imgPath2x))) {
+        await scaleImage(imgPath2x, imgPath3x, 0.6667);
+      }
+
+      // 加入记录
+      const imgRelativePath = getRelativePath(imgPath1x, rootPath);
+
+      const rPath = path.resolve(workDir, "../../lib/src");
+
+      const fileName = file.name;
+      const fileNameWithOutExt = path.basename(fileName, path.extname(fileName));
+      console.log(imgRelativePath);
+      await appendFileAsync(
+        path.join(rPath, "r.dart"),
+        `static const ${fileNameWithOutExt} = '${fileName}';\r\n`,
+        { encoding: "utf8" }
+      );
+    }
+  }
+}
+
+function svgsGenDart(targetDirectory: string): void {
+  let isFirst = true;
+
+  try {
+    // Ensure targetDirectory exists before reading it
+    if (!existsSync(targetDirectory)) {
+      throw new Error(`Directory '${targetDirectory}' does not exist.`);
+    }
+
+    const fileNames = readdirSync(targetDirectory);
+
+    for (const fileName of fileNames) {
+      const filePath = path.join(targetDirectory, fileName);
+      const stats = statSync(filePath);
+
+      if (stats.isDirectory()) {
+        svgsGen(filePath);
+      } else if (stats.isFile()) {
+        const imgPath = path.parse(filePath);
+        const lowExt = imgPath.ext.toLowerCase();
+        if (lowExt !== ".svg") {
+          continue;
+        }
+
+        const workDir = targetDirectory;
+        const filesTxtPath = path.join(workDir, "files.txt");
+
+        // Delete files.txt if it exists and isFirst is true
+        if (isFirst) {
+          isFirst = false;
+          if (existsSync(filesTxtPath)) {
+            rmSync(filesTxtPath);
+          }
+        }
+
+        // Write to files.txt
+        const svgName = changeCase.camelCase(imgPath.base);
+        // const svgPath = path.join("assets/svgs", imgPath.base);
+        const svgRelPath = getRelativePath(filePath, rootPath);
+        appendFileSync(
+          filesTxtPath,
+          `static const ${svgName} = '${svgRelPath}';\n`,
+          "utf8"
+        );
+      }
+    }
+  } catch (error: any) {
+    console.error(`Error in svgsGen: ${error.message}`);
+  }
+}
